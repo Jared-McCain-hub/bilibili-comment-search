@@ -1,0 +1,5 @@
+requests>=2.31.0
+mcp>=1.0.0
+numpy>=1.26.0
+sentence-transformers>=2.7.0
+openai>=1.30.0
