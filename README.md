@@ -1,79 +1,81 @@
-# B站评论雷达（bilibili-comment-search）
+# Bilibili Comment Radar (`bilibili-comment-search`)
 
-在 B 站单条视频下，从海量评论里**按你的问题挑出最相关的那几条**，少刷屏、少漏楼中楼。项目提供一个基于 [MCP](https://modelcontextprotocol.io) 的本地服务：拉取评论 → 去重 → 语义检索（embedding + 关键词混合）→ 可选 LLM 二次重排。
+For a **single Bilibili video**, find the **most relevant comments to your question** without endless scrolling, with optional deep pagination into nested replies (“楼中楼”). This repo ships a local [MCP](https://modelcontextprotocol.io) server: fetch comments → dedupe → semantic search (embeddings + keyword blend) → optional LLM rerank.
 
-同目录下的 **`SKILL.md`** 供 AI 助手在对话中按需触发工作流。
+**`SKILL.md`** in the same folder tells AI assistants when and how to run this workflow.
+
+**[简体中文 Chinese README → README.zh-CN.md](README.zh-CN.md)**
 
 ---
 
-## 项目介绍
+## Overview
 
-### 能解决什么问题
+### Problems it helps with
 
-- 视频很长、评论几千条，**手动翻半天**也找不到别人对你关心那点的说法。
-- 热评往往是梗或情绪，**不一定回答你的具体问题**（比如续航、难度、是否劝退）。
-- 有价值的讨论常出在**评论区深处**，容易漏看。
+- Long videos and thousands of comments—**hard to find** what others said about *your* topic.
+- Top comments are often memes or vibes, **not answers** to specific questions (battery life, difficulty, “should I buy”, etc.).
+- Useful takes often sit in **nested threads**, easy to miss.
 
-### 项目提供什么
+### What you get
 
-| 能力 | 说明 |
-|------|------|
-| **单视频评论抓取** | 主评论分页；可选「深度楼中楼」继续翻子回复。 |
-| **去重** | 按评论 ID 等方式合并重复条目。 |
-| **相似评论检索** | 用小多语向量模型做语义相似度，辅以关键词与点赞微调。 |
-| **向量缓存** | 同一 BV、同一批评论重复问时，可少算一遍评论向量。 |
-| **可选 LLM 重排** | 配置 OpenAI 兼容 API 后，可对 Top 候选再做一轮精排。 |
+| Feature | Description |
+|--------|-------------|
+| **Single-video comment fetch** | Paginated top-level comments; optional **deep nested-reply** fetching. |
+| **Deduping** | Merges duplicates (e.g. by comment id). |
+| **Similar-comment search** | Multilingual embedding similarity plus keyword signal and light like-weighting. |
+| **Vector cache** | Re-querying the same BV with the same comment set can skip re-encoding comments. |
+| **Optional LLM rerank** | With an OpenAI-compatible API, rerank top candidates for sharper ordering. |
 
-### 技术栈（简要）
+### Stack (short)
 
 - Python 3.10+
-- `mcp`（FastMCP）、`requests`、`sentence-transformers`、`numpy`；可选 `openai`。
+- `mcp` (FastMCP), `requests`, `sentence-transformers`, `numpy`; optional `openai`.
 
-### 局限（使用前请知悉）
+### Limitations
 
-- 抓取范围受接口与参数限制，**不是**「全宇宙每一条评论都入库」意义上的全量。
-- 请求过快可能触发限流，内置了较短间隔；请合理使用。
-- 结论仅反映**已抓取到的评论样本**，不能代替官方或权威结论。
+- Coverage is bounded by APIs and your parameters—not a guarantee of “every comment ever”.
+- Aggressive request rates may hit throttling; the client uses short delays—use responsibly.
+- Output reflects **only the fetched sample**, not an official or authoritative verdict.
 
 ---
 
-## 用户使用指南
+## User guide
 
-### 适用人群
+### Who it’s for
 
-- 常看 B 站测评、教程、热点视频，想**快速对齐评论区观点**的人。
-- 已在使用 **Claude Desktop、MCP Inspector** 等支持 MCP 的环境，或任意能配置 **stdio 型 MCP** 的客户端，并愿意本地跑一个小服务的用户。
+- People who watch reviews, tutorials, or trending videos on Bilibili and want **comment-section signal fast**.
+- Anyone running **Claude Desktop**, **MCP Inspector**, or any MCP client that supports **stdio** servers.
 
-### 你需要准备什么
+### Prerequisites
 
-1. **Python 3.10+**（建议 3.10～3.12，以你本机环境为准）。
-2. 克隆或已进入本项目目录 `bilibili-comment-search`。
-3. 安装依赖：
+1. **Python 3.10+** (3.10–3.12 recommended).
+2. Clone or `cd` into `bilibili-comment-search`.
+3. Install deps:
 
 ```bash
 pip install -r requirements.txt
 ```
 
-4. **首次使用语义检索**时，会自动下载 embedding 模型（体积约几百 MB），请保证网络或可提前离线配置缓存目录（见下文「性能与离线」）。
+4. **First semantic search** downloads an embedding model (on the order of hundreds of MB). Ensure network access or preconfigure offline cache (see **Performance & offline**).
 
-### 如何启动 MCP 服务
+### Run the MCP server
 
 ```bash
 python mcp_server.py
 ```
 
-正常配置下，客户端通过 **stdio** 与该进程通信；具体入口由各客户端的配置决定。
+Clients talk to this process over **stdio**; exact wiring depends on the client.
 
-### 在常见客户端里接入 MCP（不必只用 Cursor）
+### Connect from common MCP clients (not Cursor-only)
 
-本项目是 **stdio** 型 MCP：客户端会启动 `python mcp_server.py` 与本进程通信。只要你的软件支持「自定义命令 + 参数」添加 MCP，一般都能接入。**请把所有路径改成你本机上的绝对路径**（下面 Windows 路径仅为示例）。
+This is a **stdio** MCP server: the client runs `python mcp_server.py`. Any client that can register a custom command + args should work. **Use absolute paths on your machine** (examples below use Windows-style paths).
 
 #### 1. Claude Desktop
 
-编辑配置文件后**完全退出再打开** Claude：
+Quit Claude fully, edit the config, then reopen.
 
-- Windows：`%APPDATA%\Claude\claude_desktop_config.json`
-- macOS：`~/Library/Application Support/Claude/claude_desktop_config.json`
+- Windows: `%APPDATA%\Claude\claude_desktop_config.json`
+- macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`
 
 ```json
 {
@@ -86,153 +88,153 @@ python mcp_server.py
 }
 ```
 
-若系统里 `python` 不是 3.10+，可改成 `py -3.11` 或完整路径，例如 `"command": "C:\\Users\\你\\AppData\\Local\\Programs\\Python\\Python311\\python.exe"`。
+If `python` is not 3.10+, use `py -3.11` or a full interpreter path, e.g. `"command": "C:\\Users\\you\\AppData\\Local\\Programs\\Python\\Python311\\python.exe"`.
 
 #### 2. MCP Inspector
 
-不依赖付费 IDE，用于在浏览器里点选工具、看返回 JSON：
+Free debugging UI in the browser—invoke tools and inspect JSON:
 
 ```bash
 npx @modelcontextprotocol/inspector python D:/skills/bilibili-comment-search/mcp_server.py
 ```
 
-（需已安装 Node.js；首次会下载 inspector。）
-
+Requires Node.js; first run downloads the inspector.
 
 #### 3. Cursor
 
-若你使用 Cursor：在 **Cursor Settings → MCP** 添加服务器，或项目内 `.cursor/mcp.json` 使用与上面相同的 `command` / `args` 即可。
+**Cursor Settings → MCP**, or project `.cursor/mcp.json`, using the same `command` / `args` as above.
 
-保存或修改配置后，在客户端里**刷新 MCP 列表或重启应用**，应能看到工具（如 `fetch_video_comments_tool`、`search_similar_comments_tool`）。
+After saving, refresh MCP or restart the app. You should see tools such as `fetch_video_comments_tool` and `search_similar_comments_tool`.
 
-### 在对话里怎么用
+### How to use in chat
 
-你**不用记工具名**，像和朋友说话即可，例如：
+You don’t need tool names—just natural language, for example:
 
-- 贴一个视频链接，再说：「评论区有没有人吐槽续航？」
-- 「这个 BV，大家怎么说新手能不能跟？」
-- 「上次给太少了，多翻点楼中楼再给我几条。」
+- Paste a video URL and ask: “Does anyone in the comments complain about battery life?”
+- “For this BV, what do people say about whether beginners can follow along?”
+- “Last time was too few—dig nested replies and give me a few more.”
 
-前提是：**AI 客户端已加载本仓库的 `SKILL.md`，且 MCP 已连接**。助手会按技能说明去调用抓取与检索工具。
+Requires: **`SKILL.md` loaded in the assistant** and **MCP connected**.
 
-### 工具说明（供进阶用户调参）
+### Tool reference (power users)
 
-暴露的两个主要工具（名称以客户端展示为准，常见后缀 `_tool`）：
+Tool names in UIs may end with `_tool`.
 
-**1. `fetch_video_comments` — 只拉评论，不做相似度排序**
+**1. `fetch_video_comments` — fetch only, no similarity ranking**
 
-| 参数 | 默认值 | 含义 |
-|------|--------|------|
-| `bvid_or_url` | 必填 | 视频链接或 `BV` 号 |
-| `max_pages` | 20 | 主评论列表翻页上限 |
-| `sort` | `hot` | `hot` 或 `new` |
-| `include_replies` | true | 是否包含子回复 |
-| `deep_fetch_replies` | false | 是否对每条主评继续分页扒楼中楼 |
-| `max_reply_pages_per_root` | 5 | 每条主评下子回复最多翻几页（没有那么多页会自动停） |
-| `max_total_replies` | 1000 | 子回复全局大致上限，防刷爆 |
+| Parameter | Default | Meaning |
+|-----------|---------|---------|
+| `bvid_or_url` | required | Video URL or `BV` id |
+| `max_pages` | 20 | Max pages of top-level comments |
+| `sort` | `hot` | `hot` or `new` |
+| `include_replies` | true | Include shallow nested replies |
+| `deep_fetch_replies` | false | Paginate deeper into nested replies per root |
+| `max_reply_pages_per_root` | 5 | Max nested-reply pages per root (stops early if fewer exist) |
+| `max_total_replies` | 1000 | Rough global cap on nested replies fetched |
 
-**2. `search_similar_comments` — 拉评论 + 按 `query` 排最相关 TopN**
+**2. `search_similar_comments` — fetch + rank top-N by `query`**
 
-在「抓取」参数基础上额外包括：
+Same fetch-related parameters as above, plus:
 
-| 参数 | 默认值 | 含义 |
-|------|--------|------|
-| `query` | 必填 | 你想对齐的话题或问题（自然语言） |
-| `top_n` | 8 | 返回几条最相关评论 |
-| `rerank_mode` | `hybrid` | 当前为 embedding + 关键词混合 |
-| `embedding_model` | 见代码 | 默认多为 `paraphrase-multilingual-MiniLM-L12-v2` |
-| `embedding_model_cache_dir` | `.cache/models` | 模型下载缓存目录 |
-| `embedding_vector_cache_dir` | `.cache/embeddings` | 按 BV 缓存评论向量 |
-| `embedding_local_files_only` | false | 仅使用本地已缓存模型 |
-| `enable_llm_rerank` | false | 是否用 LLM 对候选再排一轮 |
-| `llm_model` | `gpt-4.1-mini` | LLM 模型名（需 API） |
-| `llm_rerank_top_k` | 30 | 送进 LLM 重排的候选条数 |
+| Parameter | Default | Meaning |
+|-----------|---------|---------|
+| `query` | required | Your question or topic (natural language) |
+| `top_n` | 8 | How many comments to return |
+| `rerank_mode` | `hybrid` | Embedding + keyword hybrid |
+| `embedding_model` | see code | Default often `paraphrase-multilingual-MiniLM-L12-v2` |
+| `embedding_model_cache_dir` | `.cache/models` | Model download cache |
+| `embedding_vector_cache_dir` | `.cache/embeddings` | Per-BV comment vector cache |
+| `embedding_local_files_only` | false | Only use locally cached models |
+| `enable_llm_rerank` | false | LLM rerank pass |
+| `llm_model` | `gpt-4.1-mini` | LLM id (needs API) |
+| `llm_rerank_top_k` | 30 | Candidates sent to LLM rerank |
 
-### 环境变量（可选）
+### Environment variables (optional)
 
-部分赛事/上传平台**不允许**技能包里出现名为 `.env.example` 等敏感文件名，因此本仓库不附带该类文件。需要时在**本机系统环境变量**或 MCP 客户端配置里自行填写即可：
+Some competition / upload platforms **forbid** files like `.env.example` in skill bundles, so this repo does **not** ship one. Set variables in your OS or client config if needed:
 
 ```text
-# 预留：若后续接入需 Cookie 的接口（当前主流程多使用公开接口）
+# The following are NOT read by the current codebase. Others can use the project without them.
+# Only relevant if you later wire logged-in/cookie-based APIs.
 # BILIBILI_SESSDATA=
 # BILIBILI_BILI_JCT=
 # BILIBILI_DEDEUSERID=
 
-# LLM 二次重排（OpenAI 兼容）
+# LLM rerank (OpenAI-compatible)
 # OPENAI_API_KEY=
 # OPENAI_BASE_URL=
 
-# Embedding 缓存目录（与代码中参数一致即可）
+# Embedding cache dirs (must match tool params if you override)
 # EMBEDDING_MODEL_CACHE_DIR=.cache/models
 # EMBEDDING_VECTOR_CACHE_DIR=.cache/embeddings
 ```
 
-### 性能与离线
+### Performance & offline
 
-- **想快一点**：可把 `deep_fetch_replies` 设为 `false`，或减少 `max_pages`。
-- **想全一点**：增大 `max_pages`、`max_reply_pages_per_root`、`max_total_replies`。
-- **离线跑 embedding**：先把模型下载到本地缓存目录，再设 `embedding_local_files_only=true` 并指向该目录。
+- **Faster**: `deep_fetch_replies=false` and/or lower `max_pages`.
+- **Broader**: raise `max_pages`, `max_reply_pages_per_root`, `max_total_replies`.
+- **Offline embeddings**: download the model once, then `embedding_local_files_only=true` and point `embedding_model_cache_dir` at the cache.
 
 ---
 
-## 具体事例
+## Example prompts
 
-下面是可以直接复制到对话里的说法（把链接或 BV 换成真实视频即可）。
+Copy-paste into chat (replace URL or BV with a real video).
 
-### 事例 1：测评买不买，看评论怎么说续航
+### 1. Review video—battery / range concerns
 
 ```text
-我刷到这个测评懒得翻评论了，你帮我看看有没有人吐槽续航缩水或者虚标？
+I found this review and don’t want to scroll comments. Does anyone say battery life is overstated or worse than advertised?
 https://www.bilibili.com/video/BVxxxxxxxx
-先说评论区大概啥风向，再贴几条最相关的原话。
+Summarize the overall vibe, then quote the most relevant comments.
 ```
 
-### 事例 2：教程能不能跟，有没有人劝退
+### 2. Tutorial—too hard for beginners?
 
 ```text
-BVxxxxxxxx 这个教学我想学，但我纯小白。
-你从评论里翻翻有没有说跟不上、太难、劝退之类的，多给几条，楼里的也行。
+BVxxxxxxxx — I’m a total beginner. Scan comments for “too hard”, “can’t keep up”, or discouragement, including nested replies if useful.
 ```
 
-### 事例 3：只想看跟「噪音」相关的说法
+### 3. Noise only
 
 ```text
-这个视频评论里大家对「噪音」咋说的？给我挑最相关的 5 条，带上为啥选它们。
-链接：……
+What do comments say about “noise”? Give me the 5 most relevant and briefly why you picked them.
+Link: …
 ```
 
-### 事例 4：觉得上次给少了，要多扒楼中楼
+### 4. Need more coverage
 
 ```text
-上次那几条不够，你再捞一轮，楼中楼也翻翻，最后还是给我个五六条最贴我问题的。
+That was too thin—fetch again with more nested threads, still give me ~5 that best match my question.
 ```
 
-### 事例 5：觉得排序不准，想再精一点
+### 5. Ranking feels off
 
 ```text
-你这前面几条不太贴我问的「夜间噪声」，能不能再精细筛一遍？不行就告诉我差在哪儿。
+The top results don’t match “nighttime noise” well—can you refine the ranking? If not, explain what’s limiting you.
 ```
 
-（若已配置 LLM，可说明「打开高精度重排」；否则助手会按混合排序解释限制。）
+(With LLM configured, you can ask to “enable high-precision rerank”; otherwise the assistant stays on hybrid ranking and explains limits.)
 
 ---
 
-## 仓库结构
+## Repository layout
 
 ```text
 bilibili-comment-search/
-├── SKILL.md              # AI 助手侧技能说明（触发与工作流）
-├── README.md             # 本文件：给人看的说明与示例
-├── mcp_server.py         # MCP 入口与工具注册
-├── bilibili_client.py    # B 站接口与评论分页、楼中楼
-├── ranking.py            # 向量相似度、混合排序、可选 LLM 重排
-├── models.py             # 数据结构
+├── SKILL.md              # Agent skill (triggers & workflow)
+├── README.md             # This file (English, default on GitHub)
+├── README.zh-CN.md       # Chinese readme
+├── mcp_server.py         # MCP entry & tool registration
+├── bilibili_client.py    # Bilibili HTTP client, pagination, nested replies
+├── ranking.py            # Embeddings, hybrid rank, optional LLM rerank
+├── models.py             # Data shapes
 └── requirements.txt
 ```
 
-（环境变量说明见上文「环境变量（可选）」，勿在压缩包内包含 `.env.example` 等易被平台拦截的文件名。）
+Do **not** bundle disallowed filenames (e.g. `.env.example`) if your platform scans uploads.
 
-## 许可证与合规
+## License & compliance
 
-- 请遵守 B 站服务条款与合理使用规范，勿高频滥用接口。
-- 第三方 MCP 与公开 API 可能变更，如运行报错请优先检查网络与接口返回信息。
+- Follow Bilibili’s terms and use reasonable request rates.
+- Public APIs and behavior may change—check network and API responses when debugging.
